@@ -1,0 +1,130 @@
+import numpy as np
+import cv2 # helps you read and manipulate images.
+import matplotlib.pyplot as plt # for plotting images and graphs.
+
+
+
+def compute_energy(image):
+    """Computes the energy map from a given image array."""
+    gray = np.sum(image.astype(np.float64), axis=2)  # Convert to float to avoid overflow
+    height, width = gray.shape
+    energy = np.zeros((height, width), dtype=np.float64) #Initialize an empty energy array
+
+    for y in range(height):
+        for x in range(width):
+            a = gray[y-1, x-1] if y > 0 and x > 0 else 0
+            b = gray[y-1, x]   if y > 0 else 0
+            c = gray[y-1, x+1] if y > 0 and x < width-1 else 0
+            d = gray[y, x-1]   if x > 0 else 0
+            e = gray[y, x]
+            f = gray[y, x+1]   if x < width-1 else 0
+            g = gray[y+1, x-1] if y < height-1 and x > 0 else 0
+            h = gray[y+1, x]   if y < height-1 else 0
+            i_val = gray[y+1, x+1] if y < height-1 and x < width-1 else 0
+
+            energy[y, x] = abs(a - i_val) + abs(b - h) + abs(c - g) + abs(d - f)
+
+    return energy
+
+def minVerticalSeamDP(energy_map):
+    rows, cols = energy_map.shape
+    seam = np.zeros(rows, dtype=np.int32) #Array to save the final seam path (one column index per row)
+    cost = energy_map.copy() #array is a copy of the energy map.
+    backtrack = np.zeros_like(cost, dtype=np.int32) #remember the best path for each pixel.
+
+    for r in range(1, rows): #starting from the second row.
+        for c in range(cols):
+            # Handle edge cases (first and last column)
+            left = cost[r - 1, c - 1] if c > 0 else float('inf')  #infint
+            up = cost[r - 1, c]
+            right = cost[r - 1, c + 1] if c < cols - 1 else float('inf')
+
+            min_val = min(left, up, right)
+            if min_val == left:
+                backtrack[r, c] = c - 1
+            elif min_val == up:
+                backtrack[r, c] = c
+            else:
+                backtrack[r, c] = c + 1
+
+            cost[r, c] += min_val
+
+    # Find column index of the minimum energy in the last row
+    seam[-1] = np.argmin(cost[-1]) # the last element in array
+  #returns the minimum index
+
+    # Backtrack to find the seam
+    for r in range(rows - 2, -1, -1):
+        seam[r] = backtrack[r + 1, seam[r + 1]]
+        #Backtrack upwards to find the whole seam path.
+
+    return seam
+
+
+
+def remove(image, seam):
+    """Removes a single vertical seam from the image."""
+    height, width, channels = image.shape
+    newImage = np.zeros((height, width - 1, channels), dtype=np.uint8)
+
+    for y in range(height):
+        x = seam[y]  #Skip the pixel at the seam index.
+        newImage[y] = np.concatenate((image[y, :x], image[y, x+1:]), axis=0)
+         #Concatenate left and right parts
+    return newImage
+
+# --- MAIN EXECUTION ---
+image_path = "cartoon.jpg"
+original_image = cv2.imread(image_path)
+
+if original_image is None:
+    raise ValueError("Image not found! Check your file path. ")
+
+plt.figure(figsize=(16, 8))  #creates a new empty figure
+
+# Subplot 1: Original Image
+plt.subplot(2, 2, 1)
+plt.imshow(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)) #converts the color format from BGR to RGB
+plt.title("Original Image")
+plt.axis("off")
+
+# Compute energy map for the original image (before seam removal)
+initial_energy_map = compute_energy(original_image)
+
+plt.subplot(2, 2, 2)
+plt.imshow(initial_energy_map, cmap="gray")
+plt.title("Energy Map of Original Image")
+plt.axis("off")
+
+num_seams = 20 #
+seam_paths = []
+temp_image = original_image.copy()
+
+for i in range(num_seams):
+    print(f"Removing seam {i+1}/{num_seams}...")
+    energy_map = compute_energy(temp_image)
+    seam_indices = minVerticalSeamDP(energy_map)    ## make change
+    seam_paths.append(seam_indices.copy())
+    temp_image = remove(temp_image, seam_indices)
+
+print("Original image shape:", original_image.shape)
+print("Final image shape:", temp_image.shape)
+
+# Subplot 3: Energy Map with Seam Paths
+plt.subplot(2, 2, 3)
+plt.imshow(initial_energy_map, cmap="gray")
+
+height, _ = initial_energy_map.shape
+for seam in seam_paths:
+    plt.plot(seam[:height], np.arange(height), 'r', linewidth=0.8)  # Ensure correct shape
+
+plt.title("Energy Map with Seam Paths")
+plt.axis("off")
+
+# Subplot 4: Final Image
+plt.subplot(2, 2, 4)
+plt.imshow(cv2.cvtColor(temp_image, cv2.COLOR_BGR2RGB))
+plt.title(f"Final Image After {num_seams} Seams Removed")
+plt.axis("off")
+
+plt.show()
